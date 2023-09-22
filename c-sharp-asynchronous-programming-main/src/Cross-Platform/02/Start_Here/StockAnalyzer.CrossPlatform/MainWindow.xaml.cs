@@ -13,6 +13,7 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using StockAnalyzer.Core;
 
 namespace StockAnalyzer.CrossPlatform;
 
@@ -49,31 +50,18 @@ public partial class MainWindow : Window
     private static string API_URL = "https://ps-async.fekberg.com/api/stocks";
     private Stopwatch stopwatch = new Stopwatch();
 
-    private void Search_Click(object sender, RoutedEventArgs e)
+    private async void Search_Click(object sender, RoutedEventArgs e)
     {
         BeforeLoadingStockData();
 
-        var client = new WebClient();
+        var store = new DataStore();
 
-        var content = client.DownloadString($"{API_URL}/{StockIdentifier.Text}");
+        var responseTask = store.GetStockPrices(StockIdentifier.Text);
 
-        // Simulate that the web call takes a very long time
-        Thread.Sleep(10000);
-
-        var data = JsonConvert.DeserializeObject<IEnumerable<StockPrice>>(content);
-
-        // This is the same as ItemsSource in WPF used in the course videos
-        Stocks.Items = data;
-
+        Stocks.Items = await responseTask;
+        
         AfterLoadingStockData();
     }
-
-
-
-
-
-
-
 
     private void BeforeLoadingStockData()
     {
