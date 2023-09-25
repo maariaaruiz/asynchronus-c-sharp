@@ -45,22 +45,41 @@ public partial class MainWindow : Window
     }
 
 
-
-
     private static string API_URL = "https://ps-async.fekberg.com/api/stocks";
     private Stopwatch stopwatch = new Stopwatch();
 
     private async void Search_Click(object sender, RoutedEventArgs e)
     {
-        BeforeLoadingStockData();
+        try
+        {
+            BeforeLoadingStockData();
 
-        var store = new DataStore();
+            await GetStock();
+        }
+        catch (Exception ex)
+        {
+            Notes.Text = ex.Message;
+        }
+        finally
+        {
+            AfterLoadingStockData();
+        }
+    }
 
-        var responseTask = store.GetStockPrices(StockIdentifier.Text);
+    private async Task GetStock()
+    {
+        try
+        {
+            var store = new DataStore();
 
-        Stocks.Items = await responseTask;
-        
-        AfterLoadingStockData();
+            var responseTask = store.GetStockPrices(StockIdentifier.Text);
+
+            Stocks.Items = await responseTask;
+        }
+        catch (Exception ex)
+        {
+            Notes.Text = ex.Message;
+        }
     }
 
     private void BeforeLoadingStockData()
