@@ -8,11 +8,15 @@ using StockAnalyzer.Core.Domain;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using Avalonia.Threading;
+using JetBrains.Annotations;
 using StockAnalyzer.Core;
 
 namespace StockAnalyzer.CrossPlatform;
@@ -48,22 +52,98 @@ public partial class MainWindow : Window
     private static string API_URL = "https://ps-async.fekberg.com/api/stocks";
     private Stopwatch stopwatch = new Stopwatch();
 
-    private async void Search_Click(object sender, RoutedEventArgs e)
+    [CanBeNull] CancellationTokenSource cancellationTokenSource;
+    private void Search_Click(object sender, RoutedEventArgs e)
     {
+        if (cancellationTokenSource is not null)
+        {
+            //already have an instance of the cancellation token source?
+            //this means the button has already pressed!
+            cancellationTokenSource.Cancel();
+            cancellationTokenSource.Dispose();
+            cancellationTokenSource = null;
+
+            Search.Content = "Search";
+            return;
+        }
+        
         try
         {
+            cancellationTokenSource = new();
+            cancellationTokenSource.Token.Register(() =>
+            {
+                Notes.Text = "Cancellation request";
+            });
+            Search.Content = "Cancel";
+         
             BeforeLoadingStockData();
+            
+            var loadLinesTask = SearchForStocks(cancellationTokenSource.Token);
+            
+            loadLinesTask.ContinueWith(
+                t =>
+                {
+                    Dispatcher.UIThread.InvokeAsync(() =>
+                    {
+                        Notes.Text = t.Exception?.InnerException?.Message;
+                    });
+                },
+                TaskContinuationOptions.OnlyOnFaulted);
 
-            await GetStock();
+            var processStockTask =
+                loadLinesTask
+                    .ContinueWith((completedTask) =>
+                    {
+                        var lines = completedTask.Result;
+                        var data = new List<StockPrice>();
+                        foreach (var line in lines.Skip(1))
+                        {
+                            var price = StockPrice.FromCSV(line);
+                            data.Add(price);
+                        }
+
+                        Dispatcher.UIThread.InvokeAsync(() =>
+                            Stocks.Items = data.Where(sp => sp.Identifier == StockIdentifier.Text));
+                    },
+                        cancellationTokenSource.Token,
+                    TaskContinuationOptions.OnlyOnRanToCompletion,
+                        TaskScheduler.Current);
+
+            processStockTask.ContinueWith(_ =>
+            {
+                Dispatcher.UIThread.InvokeAsync(() =>
+                    AfterLoadingStockData());
+                cancellationTokenSource?.Dispose();
+                cancellationTokenSource = null;
+
+                Search.Content = "Search";
+            });
         }
         catch (Exception ex)
         {
             Notes.Text = ex.Message;
         }
-        finally
+    }
+
+    private static Task<List<string>> SearchForStocks(
+        CancellationToken cancellationToken)
+    {
+        return Task.Run(async () =>
         {
-            AfterLoadingStockData();
-        }
+            using var stream = new StreamReader(File.OpenRead("StockPrices_Small.csv"));
+            var lines = new List<string>();
+
+            while (await stream.ReadLineAsync() is string line)
+            {
+                if (cancellationToken.IsCancellationRequested)
+                {
+                    break;
+                }
+                lines.Add(line);
+            }
+
+            return lines;
+        }, cancellationToken);
     }
 
     private async Task GetStock()
