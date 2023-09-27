@@ -11,6 +11,7 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Runtime.InteropServices;
@@ -79,10 +80,28 @@ public partial class MainWindow : Window
 
             BeforeLoadingStockData();
 
+            var identifiers = StockIdentifier.Text.Split(',',' ');
             var service = new StockService();
+            var loadingTasks = new List<Task<IEnumerable<StockPrice>>>();
+            foreach (var identifier in identifiers)
+            {
+              var loadTask=  service.GetStockPricesFor(
+                  identifier, cancellationTokenSource.Token);
+              
+              loadingTasks.Add(loadTask);
 
-            var data = await service.GetStockPricesFor(StockIdentifier.Text, cancellationTokenSource.Token);
-            Stocks.Items = data;
+            }
+
+            var timeOut = Task.Delay(2000);
+            var allStocksLoadingTask= Task.WhenAll(loadingTasks);
+            var completedTask = await Task.WhenAny(timeOut, allStocksLoadingTask);
+
+            if (completedTask == timeOut)
+            {
+                cancellationTokenSource.Cancel();
+                throw new OperationCanceledException("Timeout!");
+            }
+            Stocks.Items = allStocksLoadingTask.Result.SelectMany(x=>x);
         }
         catch (Exception ex)
         {
