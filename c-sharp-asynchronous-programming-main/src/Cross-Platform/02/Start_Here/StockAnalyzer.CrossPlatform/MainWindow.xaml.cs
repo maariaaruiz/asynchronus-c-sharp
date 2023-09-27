@@ -18,6 +18,7 @@ using System.Threading.Tasks;
 using Avalonia.Threading;
 using JetBrains.Annotations;
 using StockAnalyzer.Core;
+using StockAnalyzer.Core.Services;
 
 namespace StockAnalyzer.CrossPlatform;
 
@@ -53,7 +54,8 @@ public partial class MainWindow : Window
     private Stopwatch stopwatch = new Stopwatch();
 
     [CanBeNull] CancellationTokenSource cancellationTokenSource;
-    private void Search_Click(object sender, RoutedEventArgs e)
+
+    private async void Search_Click(object sender, RoutedEventArgs e)
     {
         if (cancellationTokenSource is not null)
         {
@@ -66,62 +68,34 @@ public partial class MainWindow : Window
             Search.Content = "Search";
             return;
         }
-        
+
         try
         {
             cancellationTokenSource = new();
-            cancellationTokenSource.Token.Register(() =>
-            {
-                Notes.Text = "Cancellation request";
-            });
+            cancellationTokenSource.Token.Register(() => { Notes.Text = "Cancellation request"; });
             Search.Content = "Cancel";
-         
+
             BeforeLoadingStockData();
-            
-            var loadLinesTask = SearchForStocks(cancellationTokenSource.Token);
-            
-            loadLinesTask.ContinueWith(
-                t =>
-                {
-                    Dispatcher.UIThread.InvokeAsync(() =>
-                    {
-                        Notes.Text = t.Exception?.InnerException?.Message;
-                    });
-                },
-                TaskContinuationOptions.OnlyOnFaulted);
 
-            var processStockTask =
-                loadLinesTask
-                    .ContinueWith((completedTask) =>
-                    {
-                        var lines = completedTask.Result;
-                        var data = new List<StockPrice>();
-                        foreach (var line in lines.Skip(1))
-                        {
-                            var price = StockPrice.FromCSV(line);
-                            data.Add(price);
-                        }
+            var service = new StockService();
 
-                        Dispatcher.UIThread.InvokeAsync(() =>
-                            Stocks.Items = data.Where(sp => sp.Identifier == StockIdentifier.Text));
-                    },
-                        cancellationTokenSource.Token,
-                    TaskContinuationOptions.OnlyOnRanToCompletion,
-                        TaskScheduler.Current);
+            var data = await service.GetStockPricesFor(
+                StockIdentifier.Text,
+                cancellationTokenSource.Token);
 
-            processStockTask.ContinueWith(_ =>
-            {
-                Dispatcher.UIThread.InvokeAsync(() =>
-                    AfterLoadingStockData());
-                cancellationTokenSource?.Dispose();
-                cancellationTokenSource = null;
-
-                Search.Content = "Search";
-            });
+            Stocks.Items = data;
         }
         catch (Exception ex)
         {
             Notes.Text = ex.Message;
+        }
+        finally
+        {
+            AfterLoadingStockData();
+            cancellationTokenSource?.Dispose();
+            cancellationTokenSource = null;
+
+            Search.Content = "Search";
         }
     }
 
@@ -139,6 +113,7 @@ public partial class MainWindow : Window
                 {
                     break;
                 }
+
                 lines.Add(line);
             }
 
