@@ -9,6 +9,7 @@ using StockAnalyzer.Core.Domain;
 using StockAnalyzer.Core.Services;
 using System;
 using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.Diagnostics;
 using System.IO;
 using System.Linq;
@@ -17,6 +18,7 @@ using System.Net.Http;
 using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
+using StockAnalyzer.CrossPlatform.Services;
 
 namespace StockAnalyzer.CrossPlatform;
 
@@ -59,15 +61,31 @@ public partial class MainWindow : Window
     {
         try
         {
-            var data = await GetStocksFor(StockIdentifier.Text);
-
-            Notes.Text = "Stocks loaded!";
-
+            BeforeLoadingStockData();
+            var identifiers = StockIdentifier.Text.Split(' ', ',');
+            var data = new ObservableCollection<StockPrice>();
             Stocks.Items = data;
+         //   var service = new MockStockStreamService();
+         var service = new StockDiskStreamService();
+            var enumerator = service.GetAllStockPrices();
+
+            await foreach (var price in enumerator
+                               //you can implement cancellation on your own
+                               .WithCancellation(CancellationToken.None))
+            {
+                if (identifiers.Contains(price.Identifier))
+                {
+                    data.Add(price);
+                }
+            }
         }
         catch (Exception ex)
         {
             Notes.Text = ex.Message;
+        }
+        finally
+        {
+            AfterLoadingStockData();
         }
     }
 
